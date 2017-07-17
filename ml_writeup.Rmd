@@ -1,0 +1,183 @@
+---
+title: "ML Prediction Assignment Writeup"
+author: "fastboatstR"
+date: "7/16/2017"
+output: html_document
+---
+
+```{r setup}
+# knitr::opts_chunk$set(echo = TRUE, fig.width=12, fig.height=8, results = 'asis')
+knitr::opts_chunk$set(echo = TRUE, results = 'asis')
+require(caret)
+require(dplyr)
+require(ggplot2)
+require(readr)
+require(moments)
+require(knitr)
+require(RANN)
+require(klaR)
+# set seed:
+set.seed(2017)
+```
+
+## Abstract
+
+First, an exploratory analysis of Weight Lifting Exercise training Dataset
+was performed to reveal useful prediction features as well as to remove empty variables.
+After that, cross-validation was used to determine the type of prediction model
+most suitable for predicting the class of the variable *classe*.
+Random-forest (RF) and Naive Bayes (NB) models were
+trained on train dataset using R's caret package and their accuracies were estimated
+by cross-validation. It was determined that RF model showed significantly better
+accuracy than NB model, therefore, it was used to predict *classe* variable in 
+the test dataset with an accuracy of 0.9 (90% quiz score).
+
+## Exploratory Analysis
+
+First, we loaded 'pml_training' dataset and determined its number of rows:
+
+```{r load dataset}
+pml_training <- read_csv("~/ml_final_proj/pml-training.csv", 
+    col_types = cols(X1 = col_skip()))
+# output number of rows:
+cat(nrow(pml_training))
+```
+
+We need to inspect the dataset to determine the number of columns and whether
+there are any obvious features like empty columns etc:
+
+```{r summary dataset}
+# number of rows
+cat(ncol(pml_training))
+# # dataset summary
+# summary(pml_training)
+```
+
+There are `r ncol(pml_training)` columns, but we noticed that many of these
+appear to be empty and will not be useful to build our prediction model(s):
+
+```{r empty columns}
+# datset's column names 
+col_names <- colnames(pml_training)
+# vector of blank columns with either "" or NAs:
+blank_vec <- sapply(pml_training, function(x) all(x == "" || is.na(x)))
+blank_cols <- col_names[blank_vec]
+n_blanks <- length(blank_cols)
+```
+
+We have `r n_blanks` empty columns:
+
+`r blank_cols`
+
+These can be removed from training dataset to make further exploration easier:
+
+```{r const cols}
+# remove blank columns and explore this dataframe:
+new_ds <- pml_training[,-which(names(pml_training) %in% blank_cols)]
+# new_ds <- pml_training %>% select(-one_of(blank_cols))
+# summary(new_ds)
+```
+
+Also, we have columns with some NA values, which will need to be imputed:
+
+```{r cols with some NA}
+na_cols <- apply(new_ds, 2, function(x) any(is.na(x)))
+which(na_cols == TRUE)
+```
+
+Let's determine if any columns have highly skewed data:
+
+```{r determine skewness}
+# calculate skewness
+skewnesses <- unlist(sapply(new_ds, function(x) {if (is.numeric(x)) skewness(x)}))
+high_skew_vec <- which(skewnesses < -2 | skewnesses > 2)
+# output a table of columns with high skewness
+skewd <- skewnesses[high_skew_vec]
+skewd
+```
+
+Indeed, several columns like *gyros_dumbbell_z* or *gyros_dumbbell_x* have
+highly skewed data:
+
+```{r plot skewd cols, , fig.cap="**Figure 1.** gyros_dumbbell_z column values distribution"}
+qplot(new_ds$gyros_dumbbell_z, geom="histogram") 
+```
+
+This indicates that data preprocessing would have been required if generalized
+linear model (glm) was to be used for prediction. However, *train* function doesn't
+allow to have more than 2 classes of predicted variable if *glm* model is used.
+
+## Model Training/Cross-Validation
+
+We decided to use cross-validation to estimate the accuracy of 2 different kinds
+of models: Random-forest and Naive Bayes. These 2 models were chosen because
+these 2 models are suitable for training classifiers.
+After preprocessing the data and setting train control params:
+
+```{r preprocess dataset for training}
+# define training control (set cross-validation parameters, in this case 10-fold)
+tc <- trainControl(method="repeatedcv", number=10, repeats=3, search="random")
+# prepare dataframe of features
+new_ds2 <- subset(new_ds, select= -classe)
+new_ds3 <- as.data.frame(new_ds2)
+# prepare vector of results
+res <- as.factor(new_ds$classe)
+```
+
+First, Random Forest (RF) model was trained:
+
+```{r train rf model, cache=TRUE}
+# random-forest model
+rfModel <- train(x = new_ds3, y = res, method = "rpart", 
+                 preProcess = "knnImpute",
+                 metric='Accuracy', tuneLength=15,
+                 trControl = tc
+                 )
+rfModel
+```
+
+An accuracy of about 0.88 was measured.
+Second, we attempted to train Naive Bayes (NB) model:
+
+```{r train nb, cache=TRUE, eval=FALSE}
+# naive bayses model:
+nbModel <- train(x = new_ds3, y = res, method = "nb", 
+                 preProcess = "knnImpute",
+                 metric='Accuracy', tuneLength=15,
+                 trControl = tc
+                 )
+nbModel
+
+```
+
+However, an accuracy of only about 0.76 was achieved and model training took
+significantly longer than RF model training. Thus, NB model training wasn't run 
+during the final rendering of this document.
+Evidently, RF model's accuracy and speed is better than that of NB model.
+Thus, we will use it to do predictions on the test dataset.
+
+## Out-of-sample prediction accuracy estimation for testing dataset
+
+Training dataset was first loaded:
+
+```{r load test ds}
+pml_testing <- read_csv("~/ml_final_proj/pml-testing.csv", 
+    col_types = cols(X1 = col_skip()))
+```
+Values of *classe* variable were predicted:
+
+```{r predict}
+# predict classes for test dataset:
+predictions <- predict(rfModel, pml_testing)
+predictions
+```
+
+Accuracy was determined to be 0.9 (as determined by entering predicted values
+into the grading form).
+
+## Conclusion
+Using cross-validation and Random Forest model, we were able to predict the value
+of *classe* variable in Weight Lifting Exercise Dataset with an accuracy of 90%
+(on test data).
+
+
